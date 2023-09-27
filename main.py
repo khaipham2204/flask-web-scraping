@@ -2,31 +2,15 @@ import requests
 import pandas as pd
 import pyshorteners
 
+from flask import Flask, make_response
+from flask_restful import Resource, Api
 from bs4 import BeautifulSoup
 
-
-def get_single_data_source(keyword):
-    url = f"https://www.ebay.com/sch/i.html?_nkw={keyword}"
+def get_data_source(keyword, pages):
+    url = f"https://www.ebay.com/sch/i.html?_nkw={keyword}&_pgn={pages}"
     html_page = requests.get(url).text
     soup = BeautifulSoup(html_page, 'lxml')
     return soup
-
-
-def get_multi_data_source(keyword, page=1):
-    url = f"https://www.ebay.com/sch/i.html?_nkw={keyword}&_pgn={page}"
-    html_page = requests.get(url).text
-    soup = BeautifulSoup(html_page, 'lxml')
-    return soup
-
-def get_next_page():
-    # https://www.ebay.com/sch/i.html?_from=R40&_sacat=0&_nkw=playstation+5&_pgn=13&rt=nc
-    '''
-        ol pagination__items
-        li pagination__item
-        a['href']
-    '''
-    pass
-
 
 def extract_data(soup):
     product_list = list()
@@ -53,17 +37,40 @@ def extract_data(soup):
         product_list.append(product)
 
     return product_list
-
-
-def pd_write_csv(product_list):
+    
+def pd_write_csv(product_list, page):
     df = pd.DataFrame(product_list)
-    df.to_csv('output.csv', index=False)
+    df.to_csv(f'output-{page}.csv', index=False)
     print("Saved to CSV")
 
-if  __name__ == '__main__':
-    keyword = 'play+stattion+5'
-    page = 20
+# Config Apps
+app = Flask(__name__)
+api = Api(app)
 
-    soup = get_single_data_source(keyword)
-    product_list = extract_data(soup)
-    pd_write_csv(product_list)
+class ProductListing(Resource):
+    def get(self, keyword=None, pages=1):
+        print("Request for product listing with keyword: " + keyword)
+        products_list = list()
+        for page in range(1, pages + 1):
+            multi_soup = get_data_source(keyword,page)
+            products_list.append(extract_data(multi_soup))
+        
+        return {'ProductListing': products_list, 'Amount': len(products_list)}
+        
+api.add_resource(ProductListing, '/', '/<string:keyword>/<int:pages>')
+
+
+class Export2Csv(Resource):
+    def get(self, keyword=None, pages=1):
+        multi_soup = get_data_source(keyword,pages)
+        df = pd.DataFrame(extract_data(multi_soup))
+        response  = make_response(df.to_csv(index=False))
+        response.headers["Content-Disposition"] = "attachment; filename=export.csv"
+        response.headers["Content-Type"] = "text/csv"
+        return response
+
+api.add_resource(Export2Csv, '/', '/csv/<string:keyword>/<int:pages>')
+
+if  __name__ == '__main__':
+    print("Starting the product listing API")
+    app.run(debug=True)
